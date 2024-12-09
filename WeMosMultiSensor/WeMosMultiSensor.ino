@@ -1,17 +1,17 @@
-#include <Wire.h>
-#include "DHT.h"
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include <Adafruit_BMP280.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266WiFiMulti.h>
-#include <ArduinoJson.h>
-#include <rBase64.h>
-#include <NTPClient.h>
-#include <WiFiUdp.h>
-#include <WiFiClient.h>
-#include <ESP8266HTTPClient.h>
-#include <EEPROM.h>
+#include <Wire.h> // esp8266 3.1.2
+#include "DHT.h" // DHT sensor library 1.4.6 by Adafruit
+#include <OneWire.h> // OneWire 2.3.8
+#include <DallasTemperature.h> // DallasTemperature 3.9.0 by Miles Burton
+#include <Adafruit_BMP280.h> // Adafruit BMP2800 Library 2.6.8 by Adafruit
+#include <ESP8266WiFi.h> // esp8266 3.1.2
+#include <ESP8266WiFiMulti.h> // esp8266 3.1.2
+#include <ArduinoJson.h>  // ArduinoJson 5.13.5 by Benoit Blanchon
+#include <rBase64.h> // https://github.com/tschaban/rBase64
+#include <NTPClient.h> // NTPClient 3.2.1 by by Fabrice Weinberg
+#include <WiFiUdp.h> // esp8266 3.1.2
+#include <WiFiClient.h> // esp8266 3.1.2
+#include <ESP8266HTTPClient.h> // esp8266 3.1.2
+#include <EEPROM.h> // esp8266 3.1.2
 
 #ifndef STASSID
 #define STASSID "[SSID]"
@@ -19,6 +19,8 @@
 #endif
 
 ESP8266WiFiMulti WiFiMulti;
+
+WiFiClient wifiClient;
 
 const char* ssid = STASSID;
 const char* password = STAPSK;
@@ -32,8 +34,9 @@ String timeStamp;
 
 const char* url = "http://[OWNCLOUDINSTANCE]/index.php/apps/sensorlogger/api/v1/createlog/";
 const char* urlRegister = "http://[OWNCLOUDINSTANCE]/index.php/apps/sensorlogger/api/v1/registerdevice/";
-const char* basicAuth = "[USERNAME]:[TOKEN]";
-const char* deviceUuid = "multi4fb-f0ae-4071-9de1-19d1b57624dc";
+String basicAuth = String("[USERNAME]:[TOKEN]");
+
+const char* deviceUuid = "101ti4fb-f0ae-4071-9de1-19d1b57624dc";
 
 #define DHTTYPE DHT11   // DHT 11
 #define ONE_WIRE_BUS 2  //D4
@@ -81,17 +84,20 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFiMulti.addAP(ssid, password);
 
-  Serial.print("Wait for WiFi... ");
+  Serial.println("");
+  Serial.println("Connecting... ");
 
   while (WiFiMulti.run() != WL_CONNECTED) {
     Serial.print(".");
     delay(500);
   }
   timeClient.begin();
-  Serial.println("");
+  timeClient.setTimeOffset(0);
+
   Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.print("IP address: ");
+  Serial.print(WiFi.localIP());
+  Serial.println("");
 
   EEPROM.begin(512);
   // cast bytes into structure called data
@@ -110,19 +116,24 @@ void loop() {
   while (!timeClient.update()) {
     timeClient.forceUpdate();
   }
-  String currentTime = timeClient.getFormattedTime();
-  
-  unsigned long epochTime = timeClient.getEpochTime();
-  struct tm *ptm = gmtime ((time_t *)&epochTime);
+
+  time_t epochTime = timeClient.getEpochTime();
+
+  String formattedTime = timeClient.getFormattedTime();
+
+  int currentHour = timeClient.getHours();
+  int currentMinute = timeClient.getMinutes();
+  int currentSecond = timeClient.getSeconds();
+
+  struct tm *ptm = gmtime ((time_t *)&epochTime); 
+
   int monthDay = ptm->tm_mday;
+
   int currentMonth = ptm->tm_mon+1;
+
   int currentYear = ptm->tm_year+1900;
 
-  char dayMonth[6];
-  sprintf(dayMonth, "%02d-%02d", currentMonth, monthDay);
-
-  String currentDateTime = String(currentYear) + "-" + dayMonth + " " + String(currentTime);
-  Serial.println(currentDateTime);
+  String currentDateTime = String(currentYear) + "-" + currentMonth + "-" + monthDay + " " + currentHour + ":" + currentMinute + ":" + currentSecond;
 
   if (!bmp.begin(0x76)) {
     Serial.println(F("Could not find a valid BMP280 sensor, check wiring!"));
@@ -140,27 +151,33 @@ void loop() {
   t0 = DS18B20.getTempCByIndex(0);
 
   for (int i = 0; i < 1; i++) {
-    Serial.println("--- BMP280 ---");
-    Serial.print(F("Temperature = "));
+    Serial.println("");
+    Serial.println("--- BMP280 --------------");
+    Serial.print(F("Temperature: "));
     Serial.print(bmp280temp);
     Serial.println(" *C");
-    Serial.print(F("Pressure = "));
+    Serial.print(F("Pressure: "));
     Serial.print(bmp280hPa);
     Serial.println(" Pa");
-    Serial.println(F("--- END BMP280 ---"));
-    Serial.println("--- DHT11 ---");
-    Serial.print(F("Temperature = "));
+    Serial.println(F("------------------------"));
+
+    Serial.println("");
+    Serial.println("--- DHT11 --------------");
+    Serial.print(F("Temperature: "));
     Serial.print(dth11temp);
     Serial.println(" *C");
-    Serial.print(F("Humidity = "));
+    Serial.print(F("Humidity: "));
     Serial.print(dth11hum);
     Serial.println(" %");
-    Serial.println(F("--- END DHT11 ---"));
-    Serial.println("--- DS18B20 ---");
-    Serial.print(F("Temperature = "));
+    Serial.println(F("-----------------------"));
+    
+    Serial.println("");
+    Serial.println("--- DS18B20 -----------");
+    Serial.print(F("Temperature: "));
     Serial.print(t0);
     Serial.println(" *C");
-    Serial.println(F("--- END DS18B20 ---"));
+    Serial.println(F("-----------------------"));
+    
     delay(300);
 
     DynamicJsonBuffer jsonDeviceBuffer;
@@ -201,19 +218,19 @@ void loop() {
 
     char JSONdeviceMessageBuffer[1024];
     RegisterDevice.prettyPrintTo(JSONdeviceMessageBuffer, sizeof(JSONdeviceMessageBuffer));
-    Serial.println(JSONdeviceMessageBuffer);
 
     HTTPClient httpRegister;
 
-    httpRegister.begin(urlRegister);  //Specify request destination
+    rbase64.encode(basicAuth);
+
+    String authString = String(rbase64.result());
+
+    httpRegister.begin(wifiClient, urlRegister);  //Specify request destination
     httpRegister.addHeader("Content-Type", "application/json");
-    httpRegister.addHeader("Authorization", "Basic " + rbase64.encode(basicAuth));  //Specify content-type header
+    httpRegister.addHeader("Authorization", "Basic " + authString);
 
     int httpRegisterCode = httpRegister.POST(JSONdeviceMessageBuffer);  //Send the request
     String responseRegister = httpRegister.getString();                 //Get the response payload
-
-    Serial.println(httpRegisterCode);  //Print HTTP return code
-    Serial.println(responseRegister);
 
     jsonDeviceBuffer.clear();
 
@@ -223,33 +240,34 @@ void loop() {
     bool success = registerResponse["success"];
 
     if (success) {
+
+      Serial.println("### REGISTER Device ###"); 
+
       JsonArray& data = registerResponse["data"];
 
       JsonObject& data_0 = data[0];
       SensorIds.sId_0 = data_0["id"];
-      Serial.println(SensorIds.sId_0);
 
       JsonObject& data_1 = data[1];
       SensorIds.sId_1 = data_1["id"];
-      Serial.println(SensorIds.sId_1);
 
       JsonObject& data_2 = data[2];
       SensorIds.sId_2 = data_2["id"];
-      Serial.println(SensorIds.sId_2);
 
       JsonObject& data_3 = data[3];
       SensorIds.sId_3 = data_3["id"];
-      Serial.println(SensorIds.sId_3);
 
       JsonObject& data_4 = data[4];
       SensorIds.sId_4 = data_4["id"];
-      Serial.println(SensorIds.sId_4);
 
       EEPROM.put(eeAddress, SensorIds);
       EEPROM.commit();
 
       registerResponseBuffer.clear();
     } else {
+
+      Serial.println("### SUBMITTING Data ###"); 
+
       DynamicJsonBuffer jsonBufferExtended;
 
       JsonObject& sensorDataExtended = jsonBufferExtended.createObject();
@@ -280,23 +298,25 @@ void loop() {
 
       char JSONmessageBufferExtended[1024];
       sensorDataExtended.prettyPrintTo(JSONmessageBufferExtended, sizeof(JSONmessageBufferExtended));
-      Serial.println(JSONmessageBufferExtended);
 
       HTTPClient httpExtend;
 
-      httpExtend.begin(url);  //Specify request destination
+      httpExtend.begin(wifiClient, url);  //Specify request destination
       httpExtend.addHeader("Content-Type", "application/json");
-      httpExtend.addHeader("Authorization", "Basic " + rbase64.encode(basicAuth));  //Specify content-type header
+      httpExtend.addHeader("Authorization", "Basic " + authString);  //Specify content-type header
 
       int httpCodeExtend = httpExtend.POST(JSONmessageBufferExtended);  //Send the request
       String responseExtend = httpExtend.getString();                   //Get the response payload
 
-      Serial.println(httpCodeExtend);  //Print HTTP return code
       Serial.println(responseExtend);
       jsonBufferExtended.clear();
     }
   }
-  Serial.println("Go to sleep.");
-  delay(300);
-  ESP.deepSleep(1000000L * 10);
+
+  goToSleep();
+}
+
+void goToSleep(){
+	Serial.println("Going to sleep...");
+	ESP.deepSleep(13 * 1000000); yield();
 }
